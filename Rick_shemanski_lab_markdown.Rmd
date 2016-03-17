@@ -1,0 +1,384 @@
+---
+title: "final_markdown_rick"
+author: "Rick Shemanski"
+date: "March 16, 2016"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r librarys, echo=FALSE}
+library(dplyr)
+library(nycflights13)
+library(RSQLite)
+
+flights_sqlite <- tbl(nycflights13_sqlite(), "flights")
+planes_sq <-tbl(nycflights13_sqlite(), "planes")
+weather_sq <- tbl(nycflights13_sqlite(), "weather")
+
+```
+above is the data and librarys for nycflights data
+
+
+```{r canceled flights, echo = FALSE}
+f00 <-   flights_sqlite%>%
+  mutate(
+    canceled = is.na(arr_time)
+  ) 
+
+tar_orig <- c("EWR", "JFK", "LGA")
+f1 <- filter(f00, year == 2013, canceled ==1)
+f11 <- filter(f1, origin %in% tar_orig)
+f2 <- select(f11, year, month, day, hour, minute, origin, dest, distance, 
+             dep_time, dep_delay, canceled, carrier, tailnum, flight)
+
+```
+
+
+```{r planes, echo= F}
+p0 <- mutate(planes_sq, 
+             year_made = year
+             )%>%
+  select(-year)
+planes_df <- collect(p0)
+names(planes_df)
+
+## any repeats?
+length(unique(planes_df))
+```
+
+
+
+```{r join_planes, echo=F }
+## join in sql and then assign to flights_planes_test
+
+## f2 is cancelled flights only- 
+flights_planes_canceled <- left_join(
+  f2, p0, 
+  by = "tailnum") %>%
+  collect() 
+
+## create date for merged data- planes and flights
+
+flights_planes_canceled <- flights_planes_canceled%>%
+  mutate(
+      date = paste(year, month, day, sep ="-"),
+      date = as.Date(date, format = "%Y-%m-%d")
+  )%>%
+  select(-year)
+
+
+```
+
+
+
+
+
+```{r weather_preprocess, echo=F}
+
+w1 <- filter(weather_sq, year == 2013)
+weather_df <- collect(w1)
+
+weather_df <- weather_df%>%
+  mutate(
+    date = paste(year, month, day, sep ="-"),
+    date = as.Date(date, format = "%Y-%m-%d")
+  )
+#typeof(weather_test$date) --- good
+
+## collapse to avererage daily weather- 
+by_origin <- group_by(weather_df, origin,date)
+names(by_origin)
+
+weather_mean <- by_origin%>%
+  summarise(
+    #origin = median(origin, na.rm = T)
+    temp = mean(temp, na.rm=T), 
+    dewp = mean(dewp,na.rm=T),
+    humid = mean(humid,na.rm=T),
+    wind_dir= mean(wind_dir,na.rm=T),
+    wind_speed = mean(wind_speed,na.rm=T),
+    wind_gust= mean(wind_gust,na.rm=T),
+    precip = mean(precip,na.rm=T),
+    pressure = mean(pressure,na.rm=T),
+    visib = mean(visib,na.rm=T)
+  )
+
+```
+
+
+
+```{r final_df_canc ,echo = FALSE}
+
+### daily  weather, plane description , canceled flights
+final_df_canceled <- left_join(flights_planes_canceled, weather_mean, by = c("origin"= "origin", "date" = "date")) 
+
+```
+
+
+```{r plots, echo= FALSE}
+
+p <- ggplot(final_df_canceled, aes(x = month, fill = origin))
+p <- p + geom_histogram(binwidth = 0.5)
+p + ggtitle("Cancelations by Month")
+
+p3 <- ggplot(final_df_canceled, aes(factor(month), fill = factor(origin))) + geom_bar(position = "dodge")
+p3 + ggtitle("Cancelations by Month by Aiport")
+
+```
+
+
+```{r top_canceled_dest, echo=FALSE}
+
+top_dest_Delays <- group_by(final_df_canceled, dest, month)%>%
+  summarise(
+    canceled_flights = sum(canceled)
+  )
+
+top_dest_Delays <- group_by(top_dest_Delays,month)%>%
+  mutate(
+    month_85 = quantile(canceled_flights,prob= c(0.85), na.rm= TRUE),
+    top_85 = ifelse(canceled_flights > month_85, 1, 0)
+  )
+
+top_worst <- filter(top_dest_Delays, top_85 == 1)
+
+top_worst1 <- filter(top_worst, month == 1)
+top_worst4 <- filter(top_worst, month == 4)
+top_worst9 <- filter(top_worst, month == 8)
+top_worst12 <- filter(top_worst, month == 12)
+
+
+```
+
+
+```{r worst_dest_plots, echo=FALSE}
+p_1 <- ggplot(top_worst1, aes(x= dest, y = canceled_flights, fill= dest))
+p_1<- p_1 + geom_bar(stat= "identity")
+
+p_1 <- p_1 + ggtitle("Top 20% of Canceled Destinations Month 1")
+
+
+p_4 <- ggplot(top_worst4, aes(x= dest, y = canceled_flights, fill= dest))
+p_4<- p_4 + geom_bar(stat= "identity")
+
+p_4 <- p_4 + ggtitle("Top 20% of Canceled Destinations Month 4")
+
+p_8 <- ggplot(top_worst8, aes(x= dest, y = canceled_flights, fill= dest))
+p_8<- p_8 + geom_bar(stat= "identity")
+
+p_8 <- p_8 + ggtitle("Top 20% of Canceled Destinations Month 8")
+
+
+p_12 <- ggplot(top_worst12, aes(x= dest, y = canceled_flights, fill= dest))
+p_12 <- p_12 + geom_bar(stat= "identity")
+
+p_12 <- p_12 + ggtitle("Top 20% of Canceled Destinations Month 12")
+
+```
+
+
+```{r worst_dest_plots, echo=FALSE}
+p_1
+p_4
+p_8
+p_12
+```
+
+
+Delays Now 
+
+
+
+```{r worst_dest_plots, echo=FALSE}
+f00 <-   flights_sqlite%>%
+  mutate(
+    canceled = is.na(arr_time)
+  ) 
+
+tar_orig <- c("EWR", "JFK", "LGA")
+f1 <- filter(f00, year == 2013)
+f11 <- filter(f1, origin %in% tar_orig)
+f2 <- select(f11, year, month, day, hour, minute, origin, dest, distance, 
+             dep_time, dep_delay, canceled, carrier, tailnum, flight)
+
+```
+
+
+
+
+
+```{r worst_dest_plots, echo=FALSE}
+
+## planes preprocessing
+
+##planes -- change year to year made- production year 
+p0 <- mutate(planes_sq, 
+             year_made = year
+)%>%
+  select(-year)
+planes_df <- collect(p0)
+names(planes_df)
+
+## any repeats?
+length(unique(planes_df$tailnum))
+#######################################################3333
+
+## join in sql and then assign to flights_planes_test
+
+## f2 is cancelled flights only- 
+flights_planes_all <- left_join(
+  f2, p0, 
+  by = "tailnum") %>%
+  collect() 
+
+
+########################333
+
+
+## create date for merged data- planes and flights
+
+flights_planes_all <- flights_planes_all%>%
+  mutate(
+    date = paste(year, month, day, sep ="-"),
+    date = as.Date(date, format = "%Y-%m-%d")
+  )%>%
+  select(-year)
+
+
+######
+######################################
+
+w1 <- filter(weather_sq, year == 2013)
+weather_df <- collect(w1)
+
+weather_df <- weather_df%>%
+  mutate(
+    date = paste(year, month, day, sep ="-"),
+    date = as.Date(date, format = "%Y-%m-%d")
+  )
+#typeof(weather_test$date) --- good
+
+## collapse to avererage daily weather- 
+by_origin <- group_by(weather_df, origin,date)
+names(by_origin)
+
+weather_mean <- by_origin%>%
+  summarise(
+    #origin = median(origin, na.rm = T)
+    temp = mean(temp, na.rm=T), 
+    dewp = mean(dewp,na.rm=T),
+    humid = mean(humid,na.rm=T),
+    wind_dir= mean(wind_dir,na.rm=T),
+    wind_speed = mean(wind_speed,na.rm=T),
+    wind_gust= mean(wind_gust,na.rm=T),
+    precip = mean(precip,na.rm=T),
+    pressure = mean(pressure,na.rm=T),
+    visib = mean(visib,na.rm=T)
+  )
+
+### works --
+testing <- filter(weather_df, year ==2013, month==1, day ==1)
+mean_test<- mean(testing$temp, na.rm = T)
+#mean_test
+
+
+### join canceled planes and flights to the daily weather for each origin. 
+
+final_all <- inner_join(flights_planes_all, weather_df, by = c("origin"= "origin", "date" = "date", "hour"="hour")) 
+final_all$delayed <- ifelse(final_all$dep_delay > 10 , 1, 0)
+
+
+```
+
+
+```{r weather_regressions, echo=FALSE}
+
+## weather plotting
+names(weather_df1)
+weather_df1 <- final_df%>%
+  filter(origin== "EWR")
+
+log_weather <- glm(canceled~ hour+temp + wind_speed + wind_gust+ visib + precip + pressure+ humid, 
+                  data = weather_df1, family= binomial(link="logit"))
+
+summary(log_weather)
+
+
+reg_weather <- glm(dep_delay~ hour+ temp + wind_speed + wind_gust+ visib + precip + pressure+ humid, 
+                   data = weather_df1, family= gaussian)
+
+summary(reg_weather)
+
+
+```
+
+```{r time_delay_plots, echo=FALSE}
+
+#### time delays
+
+## by day
+
+we1 <- ggplot(final_all, aes(x= day.x, y= delayed))
+we2 <- we1 + geom_bar(stat = "identity", aes(fill= day.x))
+we2 <- we2 + ggtitle("Departure Delays by day")
+we2
+
+## by hour
+hour1 <- ggplot(final_all, aes(x= hour, y= delayed))
+hour1  <- hour1  + geom_bar(stat = "identity", aes(fill= hour))
+hour1 <- hour1  + ggtitle("Departure Delays by day")
+hour1 
+```
+
+```{r worst_dest_plots, echo=FALSE}
+we2
+hour1
+```
+
+```{r plane_charterisrics, echo=FALSE}
+
+plane_char <- select(final_all, year_made, dep_delay, type)
+plane_char <- na.omit(plane_char)
+pl <- ggplot(plane_char, aes(x = year_made, y= dep_delay, fill = type))
+pl <- pl+ geom_point(aes(color= type))
+pl<- pl + facet_grid(type~.) + ggtitle("Departure Delays by Age of Plane and Plane Type")
+pl
+
+```
+
+```{r plane_char_plots, echo=FALSE}
+pl
+```
+
+```{r weather_plots, echo=FALSE}
+
+wind_df <- filter(final_all, wind_speed < 70)
+wind_lm <- lm(dep_delay~wind_speed, data = wind_df)
+summary(wind_lm)
+
+
+wind <- ggplot(wind_df, aes(wind_speed, dep_delay))
+wind_p <- wind + geom_point(aes(size= type, color = type))
+wind_p <- wind_p + stat_smooth(method= lm, aes(color= type))
+wind_p <- wind_p + ggtitle("Deperature Delay Vs Wind Speed by plane type")
+
+
+wind_b <- ggplot(wind_df, aes(visib, canceled, fill = visib))
+wind_b <- wind_b + geom_bar(stat = "identity",aes(fill= factor(visib)))
+wind_b <- wind_b + ggtitle("Flights Canceled by Visibility")
+
+
+```
+
+```{r worst_dest_plots, echo=FALSE}
+wind_p
+wind_b
+```
+
+
+
+
